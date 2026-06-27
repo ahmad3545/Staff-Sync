@@ -571,7 +571,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildAdminActionsGrid() {
     final actions = [
       {
-        'icon': FontAwesomeIcons.usersCog,
+        'icon': FontAwesomeIcons.usersGear,
         'label': 'Manage Staff',
         'color': Colors.blue,
         'route': AppConstants.staffManagementRoute,
@@ -595,7 +595,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         'route': AppConstants.approveLeavesRoute,
       },
       {
-        'icon': FontAwesomeIcons.tasks,
+        'icon': FontAwesomeIcons.listCheck,
         'label': 'Assign Tasks',
         'color': Colors.purple,
         'route': AppConstants.assignTasksRoute,
@@ -607,10 +607,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         'route': AppConstants.verifyTasksRoute,
       },
       {
-        'icon': FontAwesomeIcons.chartLine,
-        'label': 'View Reports',
+        'icon': FontAwesomeIcons.brain,
+        'label': 'Absent Prediction',
         'color': Colors.teal,
-        'route': AppConstants.reportsRoute,
+        'route': AppConstants.absentPredictionRoute,
       },
       {
         'icon': FontAwesomeIcons.calendarDays,
@@ -1125,11 +1125,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             },
           ),
           ListTile(
-            leading: const Icon(Icons.bar_chart, color: Colors.indigo),
-            title: const Text('Reports & Analytics'),
+            leading: const Icon(Icons.psychology_alt, color: Colors.indigo),
+            title: const Text('Absent Prediction'),
             onTap: () {
               Navigator.pop(context);
-              Navigator.pushNamed(context, AppConstants.reportsRoute);
+              Navigator.pushNamed(context, AppConstants.absentPredictionRoute);
             },
           ),
           const Divider(),

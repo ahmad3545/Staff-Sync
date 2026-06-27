@@ -70,7 +70,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -196,7 +196,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -248,7 +248,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -340,6 +340,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return;
       }
       await _loadReports();
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Generated $_selectedType report.'),
@@ -356,6 +359,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return;
       }
       await _loadReports();
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Saved offline. Will sync when online.'),
@@ -367,15 +373,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _downloadReport(Map<String, dynamic> report) async {
     final type = report['type']?.toString().toLowerCase();
-    final userId = report['userId']?.toString() ?? _userContext.userId;
+    final reportUserId = report['userId']?.toString();
+    final userId = reportUserId == null || reportUserId.isEmpty
+        ? _userContext.userId
+        : reportUserId;
     final from = _parseDate(report['fromUtc'])?.toUtc();
     final to = _parseDate(report['toUtc'])?.toUtc();
 
     if (type == null || userId == null || from == null || to == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to determine report parameters for download.'),
+        SnackBar(
+          content: Text(
+            'Unable to determine report parameters. Type: ${type ?? '-'}, '
+            'User: ${userId ?? '-'}, From: ${from == null ? '-' : 'ok'}, '
+            'To: ${to == null ? '-' : 'ok'}',
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -513,13 +526,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     // Firestore-like map shape: {"seconds":..., "nanoseconds":...} or _seconds
     if (value is Map) {
-      final seconds = value['seconds'] ?? value['_seconds'];
-      final nanos = value['nanoseconds'] ?? value['_nanoseconds'] ?? 0;
-      if (seconds is int || seconds is double) {
-        final ms =
-            (seconds is int ? seconds : (seconds as double).toInt()) * 1000 +
-            (nanos is int ? (nanos / 1000000).toInt() : 0);
-        return DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
+      final seconds =
+          value['seconds'] ??
+          value['Seconds'] ??
+          value['_seconds'] ??
+          value['_Seconds'];
+      final nanos =
+          value['nanoseconds'] ??
+          value['Nanoseconds'] ??
+          value['nanos'] ??
+          value['Nanos'] ??
+          value['_nanoseconds'] ??
+          value['_Nanoseconds'] ??
+          0;
+      if (seconds is num) {
+        final nanosValue = nanos is num ? nanos.toInt() : 0;
+        return DateTime.fromMillisecondsSinceEpoch(
+          seconds.toInt() * 1000 + (nanosValue / 1000000).round(),
+          isUtc: true,
+        ).toLocal();
       }
       // Sometimes Firestore returns nested objects; try parsing string inside
       final asString = value.toString();

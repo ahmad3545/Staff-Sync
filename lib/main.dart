@@ -18,6 +18,7 @@ import 'package:fyp/screens/geofence_settings_screen.dart';
 import 'package:fyp/screens/view_attendance_screen.dart';
 import 'package:fyp/screens/notifications_screen.dart';
 import 'package:fyp/screens/reports_screen.dart';
+import 'package:fyp/screens/absent_prediction_screen.dart';
 import 'package:fyp/screens/payroll_screen.dart';
 import 'package:fyp/screens/staff_management_screen.dart';
 import 'package:fyp/screens/shift_management_screen.dart';
@@ -64,6 +65,8 @@ class MyApp extends StatelessWidget {
         AppConstants.notificationsRoute: (context) =>
             const NotificationsScreen(),
         AppConstants.reportsRoute: (context) => const ReportsScreen(),
+        AppConstants.absentPredictionRoute: (context) =>
+            const AbsentPredictionScreen(),
         AppConstants.payrollRoute: (context) => const PayrollScreen(),
         AppConstants.staffManagementRoute: (context) =>
             const StaffManagementScreen(),

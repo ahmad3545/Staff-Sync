@@ -68,37 +68,37 @@ public class ExportsController : ControllerBase
         }
 
         var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return User.IsInRole("admin") || string.Equals(currentUserId, userId, StringComparison.OrdinalIgnoreCase);
+        var isAdmin = User.Claims.Any(c =>
+            c.Type == "role" && c.Value.Equals("admin", StringComparison.OrdinalIgnoreCase));
+        return isAdmin || string.Equals(currentUserId, userId, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<IActionResult> ExportCollection(string collection, string dateField, string title, string? userId, DateTime? fromUtc, DateTime? toUtc, string format)
     {
-        var query = _db.Collection(collection).OrderByDescending(dateField).Limit(500);
-
-        if (!string.IsNullOrWhiteSpace(userId))
-        {
-            query = query.WhereEqualTo("userId", userId);
-        }
-
-        if (fromUtc.HasValue)
-        {
-            query = query.WhereGreaterThanOrEqualTo(dateField, fromUtc.Value);
-        }
-
-        if (toUtc.HasValue)
-        {
-            query = query.WhereLessThanOrEqualTo(dateField, toUtc.Value);
-        }
-
+        var query = _db.Collection(collection).Limit(1000);
         var snapshot = await query.GetSnapshotAsync();
-        var rows = snapshot.Documents.Select(doc =>
-        {
-            var row = new Dictionary<string, object>(doc.ToDictionary())
+        var rows = snapshot.Documents
+            .Select(doc =>
             {
-                ["id"] = doc.Id
-            };
-            return (IDictionary<string, object>)row;
-        }).ToList();
+                var row = new Dictionary<string, object>(doc.ToDictionary())
+                {
+                    ["id"] = doc.Id
+                };
+                NormalizeDate(row, dateField);
+                NormalizeDate(row, "createdAtUtc");
+                NormalizeDate(row, "updatedAtUtc");
+                NormalizeDate(row, "timestampUtc");
+                NormalizeDate(row, "startDateUtc");
+                NormalizeDate(row, "endDateUtc");
+                NormalizeDate(row, "dueDateUtc");
+                return row;
+            })
+            .Where(row => MatchesUser(row, userId))
+            .Where(row => MatchesDateRange(row, dateField, fromUtc, toUtc))
+            .OrderByDescending(row => ParseDate(row.TryGetValue(dateField, out var value) ? value : null) ?? DateTime.MinValue)
+            .Take(500)
+            .Cast<IDictionary<string, object>>()
+            .ToList();
 
         if (format.Equals("pdf", StringComparison.OrdinalIgnoreCase))
         {
@@ -108,5 +108,67 @@ public class ExportsController : ControllerBase
 
         var csvBytes = _exportService.GenerateCsv(rows);
         return File(csvBytes, "text/csv", $"{collection}-export.csv");
+    }
+
+    private static bool MatchesUser(Dictionary<string, object> row, string? userId)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return true;
+        }
+
+        return row.TryGetValue("userId", out var value) &&
+            string.Equals(value?.ToString(), userId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesDateRange(Dictionary<string, object> row, string dateField, DateTime? fromUtc, DateTime? toUtc)
+    {
+        if (!fromUtc.HasValue && !toUtc.HasValue)
+        {
+            return true;
+        }
+
+        var date = ParseDate(row.TryGetValue(dateField, out var value) ? value : null);
+        if (!date.HasValue)
+        {
+            return false;
+        }
+
+        if (fromUtc.HasValue && date.Value < fromUtc.Value.ToUniversalTime())
+        {
+            return false;
+        }
+
+        if (toUtc.HasValue && date.Value > toUtc.Value.ToUniversalTime())
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void NormalizeDate(Dictionary<string, object> row, string key)
+    {
+        if (!row.TryGetValue(key, out var value))
+        {
+            return;
+        }
+
+        var date = ParseDate(value);
+        if (date.HasValue)
+        {
+            row[key] = date.Value.ToUniversalTime().ToString("o");
+        }
+    }
+
+    private static DateTime? ParseDate(object? value)
+    {
+        return value switch
+        {
+            Timestamp timestamp => timestamp.ToDateTime().ToUniversalTime(),
+            DateTime dateTime => dateTime.ToUniversalTime(),
+            string text when DateTime.TryParse(text, out var parsed) => parsed.ToUniversalTime(),
+            _ => null
+        };
     }
 }

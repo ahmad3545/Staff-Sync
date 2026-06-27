@@ -94,7 +94,33 @@ public class ReportsController : ControllerBase
         }
 
         var snapshot = await query.GetSnapshotAsync();
-        var results = snapshot.Documents.Select(doc => new { id = doc.Id, data = doc.ToDictionary() });
+        var results = snapshot.Documents.Select(doc =>
+        {
+            var data = doc.ToDictionary();
+            NormalizeDate(data, "fromUtc");
+            NormalizeDate(data, "toUtc");
+            NormalizeDate(data, "createdAtUtc");
+            NormalizeDate(data, "generatedAtUtc");
+
+            return new { id = doc.Id, data };
+        });
         return Ok(results);
+    }
+
+    private static void NormalizeDate(Dictionary<string, object> data, string key)
+    {
+        if (!data.TryGetValue(key, out var value))
+        {
+            return;
+        }
+
+        if (value is Timestamp timestamp)
+        {
+            data[key] = timestamp.ToDateTime().ToUniversalTime().ToString("o");
+        }
+        else if (value is DateTime dateTime)
+        {
+            data[key] = dateTime.ToUniversalTime().ToString("o");
+        }
     }
 }

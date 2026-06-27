@@ -21,6 +21,7 @@ class AppConstants {
   static const String viewAttendanceRoute = '/view-attendance';
   static const String notificationsRoute = '/notifications';
   static const String reportsRoute = '/reports';
+  static const String absentPredictionRoute = '/absent-prediction';
   static const String payrollRoute = '/payroll';
   static const String staffManagementRoute = '/staff-management';
   static const String shiftManagementRoute = '/shift-management';
