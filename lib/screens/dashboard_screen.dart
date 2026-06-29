@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fyp/constants/app_constants.dart';
 import 'package:fyp/services/auth_service.dart';
 import 'package:fyp/services/api_client.dart';
+import 'package:fyp/services/geofence_monitor.dart';
 import 'package:fyp/services/user_context.dart';
 import 'package:fyp/utils/app_theme.dart';
 import 'package:intl/intl.dart';
@@ -34,7 +35,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    Future(() => GeofenceMonitor.instance.primeLocationTracking());
     _loadOverview();
+  }
+
+  Future<void> _logout() async {
+    await GeofenceMonitor.instance.checkoutAndStopForLogout();
+    await _authService.signOut();
+    if (!mounted) {
+      return;
+    }
+    Navigator.pushReplacementNamed(context, AppConstants.loginRoute);
   }
 
   void _onItemTapped(int index) {
@@ -124,12 +135,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
               title: const Text('Logout', style: TextStyle(color: Colors.red)),
-              onTap: () {
-                Navigator.pushReplacementNamed(
-                  context,
-                  AppConstants.loginRoute,
-                );
-              },
+              onTap: _logout,
             ),
           ],
         ),

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:fyp/constants/app_constants.dart';
 import 'package:fyp/services/api_client.dart';
+import 'package:fyp/services/auth_service.dart';
+import 'package:fyp/services/geofence_monitor.dart';
 import 'package:fyp/services/user_context.dart';
 import '../utils/app_theme.dart';
 import 'package:intl/intl.dart';
@@ -17,6 +19,7 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final ApiClient _apiClient = ApiClient();
   final UserContext _userContext = UserContext();
+  final AuthService _authService = AuthService();
   bool _isLoading = false;
 
   String _adminName = 'Admin';
@@ -35,6 +38,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     super.initState();
     _todayLabel = DateFormat('EEEE, MMM dd, yyyy').format(DateTime.now());
     _loadDashboard();
+  }
+
+  Future<void> _logout() async {
+    await GeofenceMonitor.instance.checkoutAndStopForLogout();
+    await _authService.signOut();
+    if (!mounted) {
+      return;
+    }
+    Navigator.pushReplacementNamed(context, AppConstants.loginRoute);
   }
 
   Future<void> _loadDashboard() async {
@@ -1166,9 +1178,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text('Logout'),
-            onTap: () {
-              Navigator.pushReplacementNamed(context, '/login');
-            },
+            onTap: _logout,
           ),
         ],
       ),

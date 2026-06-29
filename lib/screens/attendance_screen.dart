@@ -36,6 +36,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   double? _distanceMeters;
   bool? _isInsideSite;
   bool _isLoading = false;
+  bool _isSubmittingAttendance = false;
   final List<Map<String, dynamic>> _attendanceList = [];
   final ApiClient _apiClient = ApiClient();
   final UserContext _userContext = UserContext();
@@ -44,10 +45,45 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    GeofenceMonitor.instance.status.addListener(_applyGeofenceSnapshot);
     _updateTime();
-    _loadProfileAndSiteDetails();
-    _loadAttendance();
-    _refreshLocationStatus();
+    _initializeAttendanceScreen();
+  }
+
+  @override
+  void dispose() {
+    GeofenceMonitor.instance.status.removeListener(_applyGeofenceSnapshot);
+    super.dispose();
+  }
+
+  Future<void> _initializeAttendanceScreen() async {
+    await GeofenceMonitor.instance.loadSettings();
+    _applyGeofenceSnapshot();
+    await _restoreSavedCheckInState();
+    await _loadProfileAndSiteDetails();
+    await _loadAttendance();
+    Future(() async {
+      await GeofenceMonitor.instance.primeLocationTracking();
+      _applyGeofenceSnapshot();
+    });
+  }
+
+  void _applyGeofenceSnapshot() {
+    final snapshot = GeofenceMonitor.instance.status.value;
+    if (!mounted || snapshot.lastCheck == null) {
+      return;
+    }
+    final currentLat = snapshot.currentLatitude;
+    final currentLon = snapshot.currentLongitude;
+    final distance = currentLat == null || currentLon == null
+        ? snapshot.distanceMeters
+        : Geolocator.distanceBetween(currentLat, currentLon, _siteLat, _siteLon);
+    setState(() {
+      _currentLat = currentLat;
+      _currentLon = currentLon;
+      _distanceMeters = distance;
+      _isInsideSite = distance <= _effectiveRadiusMeters;
+    });
   }
 
   void _updateTime() {
@@ -58,7 +94,55 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     });
   }
 
+  String? _latestAttendanceStatus() {
+    if (_attendanceList.isEmpty) {
+      return null;
+    }
+    final latest = _attendanceList.first;
+    final data = latest['data'] as Map<String, dynamic>? ?? {};
+    return data['status']?.toString();
+  }
+
+  Future<Position?> _resolveCheckInPosition() async {
+    final snapshotPosition = _positionFromSnapshot();
+    if (snapshotPosition != null) {
+      return snapshotPosition;
+    }
+    return _refreshLocationStatus();
+  }
+
+  Position? _positionFromSnapshot() {
+    final snapshot = GeofenceMonitor.instance.status.value;
+    if (snapshot.lastCheck != null &&
+        snapshot.currentLatitude != null &&
+        snapshot.currentLongitude != null) {
+      setState(() {
+        _currentLat = snapshot.currentLatitude;
+        _currentLon = snapshot.currentLongitude;
+        _distanceMeters = snapshot.distanceMeters;
+        _isInsideSite = snapshot.isInside;
+      });
+      return Position(
+        longitude: snapshot.currentLongitude!,
+        latitude: snapshot.currentLatitude!,
+        timestamp: snapshot.lastCheck!,
+        accuracy: 0,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+    }
+    return null;
+  }
+
   Future<void> _handleCheckInOut() async {
+    if (_isSubmittingAttendance) {
+      return;
+    }
+
     final userId = _userContext.userId;
     if (userId == null || userId.isEmpty) {
       ScaffoldMessenger.of(
@@ -67,44 +151,57 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return;
     }
 
+    setState(() {
+      _isSubmittingAttendance = true;
+    });
+
     final nextStatus = isCheckedIn ? 'check_out' : 'check_in';
-    Position? position;
-    if (nextStatus == 'check_in') {
-      position = await _refreshLocationStatus();
-      if (_isInsideSite != true) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'You are outside $_siteName. Distance: ${_formatDistance(_distanceMeters)}',
-            ),
-            backgroundColor: AppTheme.errorColor,
-          ),
-        );
-        return;
-      }
-    } else {
-      position = await _getCurrentPosition();
+    final nextCheckedIn = nextStatus == 'check_in';
+    final latestStatus = _latestAttendanceStatus();
+    if ((nextStatus == 'check_in' && latestStatus == 'check_in') ||
+        (nextStatus == 'check_out' && latestStatus == 'check_out')) {
+      setState(() {
+        isCheckedIn = latestStatus == 'check_in';
+        _isSubmittingAttendance = false;
+      });
+      return;
     }
 
-    final payload = {
-      'userId': userId,
-      'timestampUtc': DateTime.now().toUtc().toIso8601String(),
-      'status': nextStatus,
-      if (position != null) 'latitude': position.latitude,
-      if (position != null) 'longitude': position.longitude,
-    };
-
+    Position? position;
     try {
+      if (nextStatus == 'check_in') {
+        position = await _resolveCheckInPosition();
+        if (_isInsideSite != true) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'You are outside $_siteName. Distance: ${_formatDistance(_distanceMeters)}',
+              ),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+          return;
+        }
+      } else {
+        position = _positionFromSnapshot() ?? await _getCurrentPosition();
+      }
+
+      final payload = {
+        'userId': userId,
+        'timestampUtc': DateTime.now().toUtc().toIso8601String(),
+        'status': nextStatus,
+        if (position != null) 'latitude': position.latitude,
+        if (position != null) 'longitude': position.longitude,
+      };
+
       final response = await _apiClient.postJson(
         OfflineActions.markAttendance,
         payload,
       );
 
       if (response.statusCode == 401 || response.statusCode == 403) {
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Authentication failed. Please login again.'),
@@ -120,13 +217,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         );
       }
 
-      setState(() {
-        isCheckedIn = !isCheckedIn;
-      });
       final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        isCheckedIn = nextCheckedIn;
+        _attendanceList.insert(0, {
+          'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
+          'data': {
+            'status': nextStatus,
+            'timestampUtc': payload['timestampUtc'],
+            if (position != null) 'latitude': position.latitude,
+            if (position != null) 'longitude': position.longitude,
+          },
+        });
+      });
       await prefs.setBool(_attendanceCheckedInKey(userId), isCheckedIn);
       await _syncGeofencingWithCheckIn(isCheckedIn);
-      await _loadAttendance();
+      await _cacheAttendance(_attendanceList, userId);
+      Future(_loadAttendance);
       if (!mounted) {
         return;
       }
@@ -142,13 +249,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
     } catch (error) {
       debugPrint('Attendance error: $error');
+      final payload = {
+        'userId': userId,
+        'timestampUtc': DateTime.now().toUtc().toIso8601String(),
+        'status': nextStatus,
+        if (position != null) 'latitude': position.latitude,
+        if (position != null) 'longitude': position.longitude,
+      };
       await _syncQueue.enqueue(
         method: 'POST',
         path: OfflineActions.markAttendance,
         body: payload,
       );
       setState(() {
-        isCheckedIn = !isCheckedIn;
+        isCheckedIn = nextCheckedIn;
         _attendanceList.insert(0, {
           'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
           'data': {
@@ -170,6 +284,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           backgroundColor: AppTheme.warningColor,
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingAttendance = false;
+        });
+      }
     }
   }
 
@@ -211,6 +331,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool(_attendanceCheckedInKey(userId), isCheckedIn);
           await _syncGeofencingWithCheckIn(isCheckedIn);
+        } else {
+          await _restoreSavedCheckInState();
         }
 
         await _cacheAttendance(_attendanceList, userId);
@@ -274,6 +396,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String _attendanceCheckedInKey(String userId) =>
       '$_prefAttendanceCheckedInPrefix$userId';
 
+  Future<void> _restoreSavedCheckInState() async {
+    final userId = _userContext.userId;
+    if (userId == null || userId.isEmpty) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getBool(_attendanceCheckedInKey(userId)) ?? false;
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      isCheckedIn = saved;
+    });
+    await _syncGeofencingWithCheckIn(saved);
+  }
+
   Future<void> _syncGeofencingWithCheckIn(bool checkedIn) async {
     final prefs = await SharedPreferences.getInstance();
     final radius =
@@ -316,6 +454,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _siteLon = siteLon;
         _geofenceRadius = radius;
       });
+      _applyGeofenceSnapshot();
     }
 
     final userId = _userContext.userId;
@@ -413,7 +552,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _currentLat = position.latitude;
         _currentLon = position.longitude;
         _distanceMeters = distance;
-        _isInsideSite = distance <= _geofenceRadius;
+        _isInsideSite = distance <= _effectiveRadiusMeters;
       });
     }
     return position;
@@ -444,6 +583,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return double.tryParse(value?.toString() ?? '');
   }
 
+  double get _effectiveRadiusMeters =>
+      _geofenceRadius < 25 ? 25 : _geofenceRadius;
+
   String _formatDistance(double? value) {
     if (value == null) {
       return '-';
@@ -465,7 +607,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ? 'You are on site'
         : inside == false
         ? 'You are outside site'
-        : 'Location not checked';
+        : 'Checking location...';
 
     return Container(
       width: double.infinity,
@@ -509,7 +651,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Distance from site: ${_formatDistance(_distanceMeters)} / ${_geofenceRadius.toStringAsFixed(0)} m radius',
+            'Distance from site: ${_formatDistance(_distanceMeters)} / ${_effectiveRadiusMeters.toStringAsFixed(0)} m allowed',
             style: TextStyle(fontSize: 12, color: Colors.grey[700]),
           ),
           if (_currentLat != null && _currentLon != null) ...[
@@ -693,7 +835,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 width: 200,
                 height: 200,
                 child: ElevatedButton(
-                  onPressed: _handleCheckInOut,
+                  onPressed: _isSubmittingAttendance
+                      ? null
+                      : _handleCheckInOut,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: isCheckedIn
                         ? AppTheme.errorColor
@@ -704,14 +848,30 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        isCheckedIn ? Icons.logout : Icons.login,
-                        size: 48,
-                        color: Colors.white,
-                      ),
+                      if (_isSubmittingAttendance)
+                        const SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 4,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                        )
+                      else
+                        Icon(
+                          isCheckedIn ? Icons.logout : Icons.login,
+                          size: 48,
+                          color: Colors.white,
+                        ),
                       const SizedBox(height: 8),
                       Text(
-                        isCheckedIn ? 'CHECK\nOUT' : 'CHECK\nIN',
+                        _isSubmittingAttendance
+                            ? 'PLEASE\nWAIT'
+                            : isCheckedIn
+                            ? 'CHECK\nOUT'
+                            : 'CHECK\nIN',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontSize: 20,

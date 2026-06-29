@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fyp/constants/app_constants.dart';
 import 'package:fyp/utils/app_theme.dart';
 import 'package:fyp/services/auth_service.dart';
+import 'package:fyp/services/geofence_monitor.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -58,6 +59,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) {
         return;
       }
+
+      Future(() => GeofenceMonitor.instance.primeLocationTracking());
 
       final isAdmin = await _authService.hasRole('admin');
       if (!mounted) {

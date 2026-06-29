@@ -2,28 +2,115 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
 
-    // Users can read their own user document.
-    // Admins can read and write any user document.
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return signedIn() && userDoc().data.role in ['admin', 'Admin'];
+    }
+
+    function isManager() {
+      return signedIn() && userDoc().data.role in ['manager', 'Manager'];
+    }
+
+    function isStaffLead() {
+      return isAdmin() || isManager();
+    }
+
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow get: if signedIn() && (request.auth.uid == userId || isStaffLead());
+      allow list: if isStaffLead();
+      allow create: if signedIn();
+      allow update: if signedIn() && (request.auth.uid == userId || isStaffLead());
+      allow delete: if isAdmin();
     }
 
-    // Users can read tasks assigned to them.
-    // Admins can create, read, update, and delete any task.
+    match /attendance/{recordId} {
+      allow read: if signedIn() && (
+        isStaffLead() || resource.data.userId == request.auth.uid
+      );
+      allow create: if signedIn() && (
+        isStaffLead() || request.resource.data.userId == request.auth.uid
+      );
+      allow update, delete: if isStaffLead();
+    }
+
+    match /leaveRequests/{requestId} {
+      allow read: if signedIn() && (
+        isStaffLead() || resource.data.userId == request.auth.uid
+      );
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isStaffLead();
+    }
+
     match /tasks/{taskId} {
-      allow read: if request.auth != null && (
-                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
-                    resource.data.userId == request.auth.uid ||
-                    (taskId in get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedTasks)
-                  );
-      allow create, update, delete: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow read: if signedIn() && (
+        isStaffLead() ||
+        resource.data.userId == request.auth.uid ||
+        request.auth.uid in resource.data.assignees
+      );
+      allow create, update, delete: if isStaffLead();
     }
 
-    // Allow admins to read the admin_logs collection
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && (
+        isStaffLead() || resource.data.userId == request.auth.uid
+      );
+      allow create, update, delete: if isStaffLead();
+    }
+
+    match /departments/{departmentId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isStaffLead();
+    }
+
+    match /reports/{reportId} {
+      allow read, create: if isStaffLead();
+      allow update, delete: if isAdmin();
+    }
+
+    match /geofence/{settingId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /payroll/{payrollId} {
+      allow read: if signedIn() && (
+        isStaffLead() || resource.data.userId == request.auth.uid
+      );
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /shifts/{shiftId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isStaffLead();
+    }
+
+    match /shiftAssignments/{assignmentId} {
+      allow read: if signedIn() && (
+        isStaffLead() || resource.data.userId == request.auth.uid
+      );
+      allow create, update, delete: if isStaffLead();
+    }
+
+    match /taskProofs/{proofId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isStaffLead();
+    }
+
     match /admin_logs/{logId} {
-      allow read, write: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow read, write: if isAdmin();
     }
   }
 }

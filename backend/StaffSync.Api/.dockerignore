@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+.vscode/
+uploads/
+firebase-service-account.json
+*.Development.json

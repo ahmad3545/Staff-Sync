@@ -3,11 +3,13 @@ import 'package:fyp/constants/app_constants.dart';
 import 'package:fyp/utils/app_theme.dart';
 import 'package:fyp/utils/dummy_data.dart';
 import 'package:fyp/services/auth_service.dart';
+import 'package:fyp/services/geofence_monitor.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
   Future<void> _signOut(BuildContext context) async {
+    await GeofenceMonitor.instance.checkoutAndStopForLogout();
     await AuthService().signOut();
     if (!context.mounted) {
       return;

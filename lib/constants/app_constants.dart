@@ -72,6 +72,13 @@ class AppConstants {
 
   // API
   static String get apiBaseUrl {
+    const configuredUrl = String.fromEnvironment('API_BASE_URL');
+    if (configuredUrl.isNotEmpty) {
+      return configuredUrl;
+    }
+    if (kReleaseMode) {
+      return 'https://staff-sync-51245.web.app';
+    }
     if (kIsWeb) {
       return 'http://localhost:5108';
     }
