@@ -87,23 +87,23 @@ public class ReportsController : ControllerBase
         }
 
         var isAdmin = User.Claims.Any(c => c.Type == "role" && c.Value == "admin");
-        var query = _db.Collection("reports").OrderByDescending("createdAtUtc").Limit(100);
-        if (!isAdmin)
-        {
-            query = query.WhereEqualTo("userId", currentUserId);
-        }
+        var snapshot = await _db.Collection("reports").Limit(300).GetSnapshotAsync();
+        var results = snapshot.Documents
+            .Select(doc =>
+            {
+                var data = doc.ToDictionary();
+                NormalizeDate(data, "fromUtc");
+                NormalizeDate(data, "toUtc");
+                NormalizeDate(data, "createdAtUtc");
+                NormalizeDate(data, "generatedAtUtc");
 
-        var snapshot = await query.GetSnapshotAsync();
-        var results = snapshot.Documents.Select(doc =>
-        {
-            var data = doc.ToDictionary();
-            NormalizeDate(data, "fromUtc");
-            NormalizeDate(data, "toUtc");
-            NormalizeDate(data, "createdAtUtc");
-            NormalizeDate(data, "generatedAtUtc");
-
-            return new { id = doc.Id, data };
-        });
+                return new { id = doc.Id, data };
+            })
+            .Where(item => isAdmin ||
+                (item.data.TryGetValue("userId", out var userId) &&
+                    string.Equals(userId?.ToString(), currentUserId, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(item => ParseDate(item.data.TryGetValue("createdAtUtc", out var created) ? created : null) ?? DateTime.MinValue)
+            .Take(100);
         return Ok(results);
     }
 
@@ -122,5 +122,16 @@ public class ReportsController : ControllerBase
         {
             data[key] = dateTime.ToUniversalTime().ToString("o");
         }
+    }
+
+    private static DateTime? ParseDate(object? value)
+    {
+        return value switch
+        {
+            Timestamp timestamp => timestamp.ToDateTime().ToUniversalTime(),
+            DateTime dateTime => dateTime.ToUniversalTime(),
+            string text when DateTime.TryParse(text, out var parsed) => parsed.ToUniversalTime(),
+            _ => null
+        };
     }
 }

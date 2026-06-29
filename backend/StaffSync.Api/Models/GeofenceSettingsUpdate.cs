@@ -4,6 +4,12 @@ namespace StaffSync.Api.Models;
 
 public class GeofenceSettingsUpdate
 {
+    [MaxLength(200)]
+    public string? SiteName { get; set; }
+
+    [MaxLength(1000)]
+    public string? SiteAddress { get; set; }
+
     [Range(-90, 90)]
     public double CenterLatitude { get; set; }
 

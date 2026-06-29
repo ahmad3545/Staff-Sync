@@ -9,6 +9,7 @@ import 'package:fyp/services/offline_actions.dart';
 import 'package:fyp/services/sync_queue_service.dart';
 import 'package:fyp/services/user_context.dart';
 import 'package:intl/intl.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AttendanceScreen extends StatefulWidget {
@@ -27,6 +28,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String _userName = 'User';
   String _siteName = AppConstants.geofenceSiteName;
   String _siteAddress = AppConstants.geofenceSiteAddress;
+  double _siteLat = AppConstants.geofenceSiteLat;
+  double _siteLon = AppConstants.geofenceSiteLon;
+  double _geofenceRadius = AppConstants.geofenceDefaultRadius;
+  double? _currentLat;
+  double? _currentLon;
+  double? _distanceMeters;
+  bool? _isInsideSite;
   bool _isLoading = false;
   final List<Map<String, dynamic>> _attendanceList = [];
   final ApiClient _apiClient = ApiClient();
@@ -39,6 +47,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     _updateTime();
     _loadProfileAndSiteDetails();
     _loadAttendance();
+    _refreshLocationStatus();
   }
 
   void _updateTime() {
@@ -59,10 +68,31 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
 
     final nextStatus = isCheckedIn ? 'check_out' : 'check_in';
+    Position? position;
+    if (nextStatus == 'check_in') {
+      position = await _refreshLocationStatus();
+      if (_isInsideSite != true) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'You are outside $_siteName. Distance: ${_formatDistance(_distanceMeters)}',
+            ),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+        return;
+      }
+    } else {
+      position = await _getCurrentPosition();
+    }
+
     final payload = {
       'userId': userId,
       'timestampUtc': DateTime.now().toUtc().toIso8601String(),
       'status': nextStatus,
+      if (position != null) 'latitude': position.latitude,
+      if (position != null) 'longitude': position.longitude,
     };
 
     try {
@@ -250,18 +280,30 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         prefs.getDouble('geofence_radius') ??
         AppConstants.geofenceDefaultRadius;
     final autoAlerts = prefs.getBool('geofence_auto_alerts') ?? true;
+    final siteLat = prefs.getDouble('geofence_site_lat') ?? _siteLat;
+    final siteLon = prefs.getDouble('geofence_site_lon') ?? _siteLon;
 
     await GeofenceMonitor.instance.updateSettings(
       radiusMeters: radius,
       autoAlerts: autoAlerts,
       enabled: checkedIn,
+      siteLatitude: siteLat,
+      siteLongitude: siteLon,
     );
   }
 
   Future<void> _loadProfileAndSiteDetails() async {
     final prefs = await SharedPreferences.getInstance();
+    await _loadServerGeofence(prefs);
     final siteName = prefs.getString('geofence_site_name');
     final siteAddress = prefs.getString('geofence_site_address');
+    final siteLat =
+        prefs.getDouble('geofence_site_lat') ?? AppConstants.geofenceSiteLat;
+    final siteLon =
+        prefs.getDouble('geofence_site_lon') ?? AppConstants.geofenceSiteLon;
+    final radius =
+        prefs.getDouble('geofence_radius') ??
+        AppConstants.geofenceDefaultRadius;
     if (mounted) {
       setState(() {
         _siteName = (siteName == null || siteName.isEmpty)
@@ -270,6 +312,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _siteAddress = (siteAddress == null || siteAddress.isEmpty)
             ? AppConstants.geofenceSiteAddress
             : siteAddress;
+        _siteLat = siteLat;
+        _siteLon = siteLon;
+        _geofenceRadius = radius;
       });
     }
 
@@ -309,6 +354,179 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return address;
     }
     return '$name, $address';
+  }
+
+  Future<void> _loadServerGeofence(SharedPreferences prefs) async {
+    try {
+      final response = await _apiClient.get('/api/geofence');
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return;
+      }
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      if (decoded['exists'] != true || decoded['data'] is! Map) {
+        return;
+      }
+      final data = Map<String, dynamic>.from(decoded['data'] as Map);
+      final siteName = data['siteName']?.toString();
+      final siteAddress = data['siteAddress']?.toString();
+      final lat = _toDouble(data['centerLatitude']);
+      final lon = _toDouble(data['centerLongitude']);
+      final radius = _toDouble(data['radiusMeters']);
+      if (siteName != null && siteName.isNotEmpty) {
+        await prefs.setString('geofence_site_name', siteName);
+      }
+      if (siteAddress != null && siteAddress.isNotEmpty) {
+        await prefs.setString('geofence_site_address', siteAddress);
+      }
+      if (lat != null && lon != null) {
+        await prefs.setDouble('geofence_site_lat', lat);
+        await prefs.setDouble('geofence_site_lon', lon);
+      }
+      if (radius != null) {
+        await prefs.setDouble('geofence_radius', radius);
+      }
+    } catch (_) {
+      // Use local/default geofence when the server is unavailable.
+    }
+  }
+
+  Future<Position?> _refreshLocationStatus() async {
+    final position = await _getCurrentPosition();
+    if (position == null) {
+      if (mounted) {
+        setState(() {
+          _isInsideSite = null;
+          _distanceMeters = null;
+        });
+      }
+      return null;
+    }
+
+    final distance = Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      _siteLat,
+      _siteLon,
+    );
+    if (mounted) {
+      setState(() {
+        _currentLat = position.latitude;
+        _currentLon = position.longitude;
+        _distanceMeters = distance;
+        _isInsideSite = distance <= _geofenceRadius;
+      });
+    }
+    return position;
+  }
+
+  Future<Position?> _getCurrentPosition() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return null;
+    }
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return null;
+    }
+    return Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
+  }
+
+  double? _toDouble(dynamic value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    return double.tryParse(value?.toString() ?? '');
+  }
+
+  String _formatDistance(double? value) {
+    if (value == null) {
+      return '-';
+    }
+    if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(2)} km';
+    }
+    return '${value.toStringAsFixed(0)} m';
+  }
+
+  Widget _buildLocationStatusCard() {
+    final inside = _isInsideSite;
+    final color = inside == true
+        ? AppTheme.successColor
+        : inside == false
+        ? AppTheme.errorColor
+        : AppTheme.warningColor;
+    final label = inside == true
+        ? 'You are on site'
+        : inside == false
+        ? 'You are outside site'
+        : 'Location not checked';
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.location_on_outlined, color: color),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(fontWeight: FontWeight.bold, color: color),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _refreshLocationStatus,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Refresh'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _buildSiteLabel(),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Distance from site: ${_formatDistance(_distanceMeters)} / ${_geofenceRadius.toStringAsFixed(0)} m radius',
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+          if (_currentLat != null && _currentLon != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Your coordinates: ${_currentLat!.toStringAsFixed(6)}, ${_currentLon!.toStringAsFixed(6)}',
+              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            'Site coordinates: ${_siteLat.toStringAsFixed(6)}, ${_siteLon.toStringAsFixed(6)}',
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showCameraDialog() {
@@ -465,6 +683,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ),
 
+            _buildLocationStatusCard(),
+            const SizedBox(height: 16),
+
             // Check In/Out Button
             Padding(
               padding: const EdgeInsets.all(16),
@@ -581,8 +802,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           child: ListTile(
                             leading: CircleAvatar(
                               backgroundColor: isPresent
-                                  ? AppTheme.successColor.withOpacity(0.1)
-                                  : AppTheme.errorColor.withOpacity(0.1),
+                                  ? AppTheme.successColor.withValues(alpha: 0.1)
+                                  : AppTheme.errorColor.withValues(alpha: 0.1),
                               child: Icon(
                                 isPresent ? Icons.check_circle : Icons.cancel,
                                 color: isPresent

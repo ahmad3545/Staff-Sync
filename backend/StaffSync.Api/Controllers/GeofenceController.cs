@@ -37,6 +37,8 @@ public class GeofenceController : ControllerBase
     {
         var data = new Dictionary<string, object?>
         {
+            ["siteName"] = string.IsNullOrWhiteSpace(request.SiteName) ? "Main Office" : request.SiteName,
+            ["siteAddress"] = request.SiteAddress,
             ["centerLatitude"] = request.CenterLatitude,
             ["centerLongitude"] = request.CenterLongitude,
             ["radiusMeters"] = request.RadiusMeters,

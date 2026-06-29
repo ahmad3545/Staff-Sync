@@ -104,12 +104,22 @@ public class PayrollController : ControllerBase
         }
 
         var snapshot = await _db.Collection("payroll")
-            .WhereEqualTo("userId", userId)
-            .OrderByDescending("createdAtUtc")
-            .Limit(50)
+            .Limit(300)
             .GetSnapshotAsync();
 
-        var results = snapshot.Documents.Select(doc => new { id = doc.Id, data = doc.ToDictionary() });
+        var results = snapshot.Documents
+            .Select(doc =>
+            {
+                var data = doc.ToDictionary();
+                NormalizeDate(data, "periodStartUtc");
+                NormalizeDate(data, "periodEndUtc");
+                NormalizeDate(data, "createdAtUtc");
+                return new { id = doc.Id, data };
+            })
+            .Where(item => item.data.TryGetValue("userId", out var recordUserId) &&
+                string.Equals(recordUserId?.ToString(), userId, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => ReadDateTime(item.data, "createdAtUtc") ?? DateTime.MinValue)
+            .Take(50);
         return Ok(results);
     }
 
@@ -154,8 +164,8 @@ public class PayrollController : ControllerBase
         {
             Id = id,
             UserId = data.TryGetValue("userId", out var userId) ? userId?.ToString() ?? "" : "",
-            PeriodStartUtc = data.TryGetValue("periodStartUtc", out var start) ? (DateTime)start : DateTime.UtcNow,
-            PeriodEndUtc = data.TryGetValue("periodEndUtc", out var end) ? (DateTime)end : DateTime.UtcNow,
+            PeriodStartUtc = ReadDateTime(data, "periodStartUtc") ?? DateTime.UtcNow,
+            PeriodEndUtc = ReadDateTime(data, "periodEndUtc") ?? DateTime.UtcNow,
             BaseSalary = data.TryGetValue("baseSalary", out var baseSalary) ? Convert.ToDecimal(baseSalary) : 0,
             Allowances = data.TryGetValue("allowances", out var allowances) ? Convert.ToDecimal(allowances) : 0,
             Deductions = data.TryGetValue("deductions", out var deductions) ? Convert.ToDecimal(deductions) : 0,
@@ -163,8 +173,17 @@ public class PayrollController : ControllerBase
             OvertimeRate = data.TryGetValue("overtimeRate", out var overtimeRate) ? Convert.ToDecimal(overtimeRate) : 0,
             NetSalary = data.TryGetValue("netSalary", out var netSalary) ? Convert.ToDecimal(netSalary) : 0,
             Status = data.TryGetValue("status", out var status) ? status?.ToString() ?? "processed" : "processed",
-            CreatedAtUtc = data.TryGetValue("createdAtUtc", out var created) ? (DateTime)created : DateTime.UtcNow
+            CreatedAtUtc = ReadDateTime(data, "createdAtUtc") ?? DateTime.UtcNow
         };
+    }
+
+    private static void NormalizeDate(Dictionary<string, object> data, string key)
+    {
+        var date = ReadDateTime(data, key);
+        if (date.HasValue)
+        {
+            data[key] = date.Value.ToUniversalTime().ToString("o");
+        }
     }
 
     private static DateTime? ReadDateTime(IReadOnlyDictionary<string, object> data, string key)
