@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fyp/constants/app_constants.dart';
 import 'package:fyp/utils/app_theme.dart';
 import 'package:fyp/services/auth_service.dart';
@@ -62,13 +63,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
       Future(() => GeofenceMonitor.instance.primeLocationTracking());
 
-      final isAdmin = await _authService.hasRole('admin');
+      final role = await _resolveUserRole();
       if (!mounted) {
         return;
       }
       Navigator.pushReplacementNamed(
         context,
-        isAdmin ? '/admin-dashboard' : AppConstants.dashboardRoute,
+        role == 'admin'
+            ? '/admin-dashboard'
+            : role == 'manager'
+            ? AppConstants.managerDashboardRoute
+            : AppConstants.dashboardRoute,
       );
     } catch (error) {
       if (!mounted) {
@@ -84,6 +89,32 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     }
+  }
+
+  Future<String> _resolveUserRole() async {
+    if (await _authService.hasRole('admin')) {
+      return 'admin';
+    }
+    if (await _authService.hasRole('manager')) {
+      return 'manager';
+    }
+    final userId = _authService.currentUserId;
+    if (userId == null || userId.isEmpty) {
+      return 'employee';
+    }
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      final role = snapshot.data()?['role']?.toString().toLowerCase();
+      if (role == 'admin' || role == 'manager') {
+        return role!;
+      }
+    } catch (_) {
+      // Fall back to employee dashboard if role cannot be read.
+    }
+    return 'employee';
   }
 
   @override

@@ -8,6 +8,7 @@ import 'package:fyp/screens/login_screen.dart';
 import 'package:fyp/screens/register_screen.dart';
 import 'package:fyp/screens/dashboard_screen.dart';
 import 'package:fyp/screens/admin_dashboard_screen.dart';
+import 'package:fyp/screens/manager_dashboard_screen.dart';
 import 'package:fyp/screens/attendance_screen.dart';
 import 'package:fyp/screens/schedule_screen.dart';
 import 'package:fyp/screens/leave_request_screen.dart';
@@ -52,6 +53,8 @@ class MyApp extends StatelessWidget {
         AppConstants.registerRoute: (context) => const RegisterScreen(),
         AppConstants.dashboardRoute: (context) => const DashboardScreen(),
         '/admin-dashboard': (context) => const AdminDashboardScreen(),
+        AppConstants.managerDashboardRoute: (context) =>
+            const ManagerDashboardScreen(),
         AppConstants.attendanceRoute: (context) => const AttendanceScreen(),
         AppConstants.scheduleRoute: (context) => const ScheduleScreen(),
         AppConstants.leaveRequestRoute: (context) => const LeaveRequestScreen(),

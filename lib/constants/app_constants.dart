@@ -11,6 +11,7 @@ class AppConstants {
   static const String loginRoute = '/login';
   static const String registerRoute = '/register';
   static const String dashboardRoute = '/dashboard';
+  static const String managerDashboardRoute = '/manager-dashboard';
   static const String attendanceRoute = '/attendance';
   static const String scheduleRoute = '/schedule';
   static const String leaveRequestRoute = '/leave-request';
