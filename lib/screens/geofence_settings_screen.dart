@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:fyp/constants/app_constants.dart';
 import 'package:fyp/services/api_client.dart';
 import 'package:fyp/services/geofence_monitor.dart';
@@ -204,57 +203,51 @@ class _GeofenceSettingsScreenState extends State<GeofenceSettingsScreen> {
             height: 280,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: kIsWeb
-                  ? _buildWebMapFallback()
-                  : GoogleMap(
-                      initialCameraPosition: CameraPosition(
-                        target: _sitePosition,
-                        zoom: 16,
-                      ),
-                      myLocationEnabled: true,
-                      myLocationButtonEnabled: false,
-                      zoomControlsEnabled: false,
-                      markers: {
-                        Marker(
-                          markerId: const MarkerId('site'),
-                          position: _sitePosition,
-                          draggable: true,
-                          infoWindow: InfoWindow(
-                            title: _siteNameController.text.trim().isEmpty
-                                ? 'Selected Site'
-                                : _siteNameController.text.trim(),
-                          ),
-                          onDragEnd: _selectPosition,
-                        ),
-                        if (_currentPosition != null)
-                          Marker(
-                            markerId: const MarkerId('current'),
-                            position: _currentPosition!,
-                            icon: BitmapDescriptor.defaultMarkerWithHue(
-                              BitmapDescriptor.hueAzure,
-                            ),
-                            infoWindow: const InfoWindow(
-                              title: 'Your Location',
-                            ),
-                          ),
-                      },
-                      circles: {
-                        Circle(
-                          circleId: const CircleId('radius'),
-                          center: _sitePosition,
-                          radius: _radiusMeters,
-                          fillColor: AppTheme.primaryColor.withValues(
-                            alpha: 0.12,
-                          ),
-                          strokeColor: AppTheme.primaryColor,
-                          strokeWidth: 2,
-                        ),
-                      },
-                      onMapCreated: (controller) {
-                        _mapController = controller;
-                      },
-                      onTap: _selectPosition,
+              child: GoogleMap(
+                initialCameraPosition: CameraPosition(
+                  target: _sitePosition,
+                  zoom: 16,
+                ),
+                myLocationEnabled: true,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                markers: {
+                  Marker(
+                    markerId: const MarkerId('site'),
+                    position: _sitePosition,
+                    draggable: true,
+                    infoWindow: InfoWindow(
+                      title: _siteNameController.text.trim().isEmpty
+                          ? 'Selected Site'
+                          : _siteNameController.text.trim(),
                     ),
+                    onDragEnd: _selectPosition,
+                  ),
+                  if (_currentPosition != null)
+                    Marker(
+                      markerId: const MarkerId('current'),
+                      position: _currentPosition!,
+                      icon: BitmapDescriptor.defaultMarkerWithHue(
+                        BitmapDescriptor.hueAzure,
+                      ),
+                      infoWindow: const InfoWindow(title: 'Your Location'),
+                    ),
+                },
+                circles: {
+                  Circle(
+                    circleId: const CircleId('radius'),
+                    center: _sitePosition,
+                    radius: _radiusMeters,
+                    fillColor: AppTheme.primaryColor.withValues(alpha: 0.12),
+                    strokeColor: AppTheme.primaryColor,
+                    strokeWidth: 2,
+                  ),
+                },
+                onMapCreated: (controller) {
+                  _mapController = controller;
+                },
+                onTap: _selectPosition,
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -657,36 +650,6 @@ class _GeofenceSettingsScreenState extends State<GeofenceSettingsScreen> {
       return value.toDouble();
     }
     return double.tryParse(value?.toString() ?? '');
-  }
-
-  Widget _buildWebMapFallback() {
-    return Container(
-      color: Colors.grey.shade100,
-      alignment: Alignment.center,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.map_outlined,
-            size: 42,
-            color: AppTheme.primaryColor,
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Map preview needs Google Maps Web API setup.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Use search, current location, or manual latitude/longitude fields.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildInfoRow(String label, String value) {

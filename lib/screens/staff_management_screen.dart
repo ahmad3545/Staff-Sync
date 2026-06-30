@@ -15,6 +15,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   String _selectedRole = 'All';
   final List<String> _roles = const ['All', 'Admin', 'Manager', 'Employee'];
   final List<Map<String, dynamic>> _staff = [];
+  final List<String> _departments = [];
   bool _isLoading = false;
   final ApiClient _apiClient = ApiClient();
 
@@ -24,12 +25,13 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
   final _passwordController = TextEditingController();
   final _departmentController = TextEditingController();
   String _newRole = 'Employee';
+  String? _newDepartment;
   bool _isCreating = false;
 
   @override
   void initState() {
     super.initState();
-    _loadStaff();
+    _loadInitialData();
   }
 
   @override
@@ -284,7 +286,12 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
 
   Future<void> _openStaffProfileScreen(Map<String, dynamic> staff) async {
     final updated = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (context) => StaffProfileScreen(staff: staff)),
+      MaterialPageRoute(
+        builder: (context) => StaffProfileScreen(
+          staff: staff,
+          departments: _departmentOptions(staff['dept']?.toString()),
+        ),
+      ),
     );
 
     if (updated == true && mounted) {
@@ -550,6 +557,54 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     }
   }
 
+  Future<void> _loadInitialData() async {
+    setState(() {
+      _isLoading = true;
+    });
+    await Future.wait([_loadDepartments(), _loadStaff()]);
+  }
+
+  Future<void> _loadDepartments() async {
+    try {
+      final response = await _apiClient.get('/api/departments');
+      if (response.statusCode != 200) {
+        return;
+      }
+      final list = List<Map<String, dynamic>>.from(
+        jsonDecode(response.body) as List<dynamic>,
+      );
+      final names = list
+          .map((item) {
+            final data = item['data'] as Map<String, dynamic>? ?? {};
+            return data['name']?.toString().trim();
+          })
+          .whereType<String>()
+          .where((name) => name.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      if (mounted) {
+        setState(() {
+          _departments
+            ..clear()
+            ..addAll(names);
+        });
+      }
+    } catch (_) {
+      // Ignore department load errors.
+    }
+  }
+
+  List<String> _departmentOptions([String? current]) {
+    final options = {..._departments};
+    final existing = current?.trim();
+    if (existing != null && existing.isNotEmpty && existing != '-') {
+      options.add(existing);
+    }
+    final sorted = options.toList()..sort();
+    return sorted;
+  }
+
   String _normalizeRole(String role) {
     final normalized = role.toLowerCase();
     if (normalized == 'admin') {
@@ -568,6 +623,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     _passwordController.clear();
     _departmentController.clear();
     _newRole = 'Employee';
+    _newDepartment = null;
 
     showDialog<void>(
       context: context,
@@ -601,9 +657,26 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _departmentController,
-                decoration: const InputDecoration(labelText: 'Department'),
+              DropdownButtonFormField<String>(
+                initialValue: _newDepartment,
+                items: _departmentOptions()
+                    .map(
+                      (department) => DropdownMenuItem(
+                        value: department,
+                        child: Text(department),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  _newDepartment = value;
+                  _departmentController.text = value ?? '';
+                },
+                decoration: InputDecoration(
+                  labelText: 'Department',
+                  helperText: _departments.isEmpty
+                      ? 'Create departments from Departments screen first'
+                      : null,
+                ),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -665,9 +738,9 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
       'phone': _phoneController.text.trim().isEmpty
           ? null
           : _phoneController.text.trim(),
-      'departmentId': _departmentController.text.trim().isEmpty
+      'departmentId': (_newDepartment ?? _departmentController.text).trim().isEmpty
           ? null
-          : _departmentController.text.trim(),
+          : (_newDepartment ?? _departmentController.text).trim(),
       'role': _newRole.toLowerCase(),
     };
 
@@ -709,8 +782,13 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
 
 class StaffProfileScreen extends StatefulWidget {
   final Map<String, dynamic> staff;
+  final List<String> departments;
 
-  const StaffProfileScreen({super.key, required this.staff});
+  const StaffProfileScreen({
+    super.key,
+    required this.staff,
+    required this.departments,
+  });
 
   @override
   State<StaffProfileScreen> createState() => _StaffProfileScreenState();
@@ -722,6 +800,7 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
   late final TextEditingController _phoneController;
   late final TextEditingController _departmentController;
   late String _selectedRole;
+  String? _selectedDepartment;
   bool _isSaving = false;
   bool _isDeleting = false;
   final ApiClient _apiClient = ApiClient();
@@ -741,6 +820,11 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
     _departmentController = TextEditingController(
       text: widget.staff['dept']?.toString() ?? '',
     );
+    final currentDepartment = widget.staff['dept']?.toString();
+    _selectedDepartment =
+        currentDepartment == null || currentDepartment.isEmpty || currentDepartment == '-'
+        ? null
+        : currentDepartment;
     _selectedRole = widget.staff['role']?.toString() ?? 'Employee';
   }
 
@@ -784,9 +868,30 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
               decoration: const InputDecoration(labelText: 'Phone'),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _departmentController,
-              decoration: const InputDecoration(labelText: 'Department'),
+            DropdownButtonFormField<String>(
+              initialValue: _departmentOptions().contains(_selectedDepartment)
+                  ? _selectedDepartment
+                  : null,
+              items: _departmentOptions()
+                  .map(
+                    (department) => DropdownMenuItem(
+                      value: department,
+                      child: Text(department),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedDepartment = value;
+                  _departmentController.text = value ?? '';
+                });
+              },
+              decoration: InputDecoration(
+                labelText: 'Department',
+                helperText: widget.departments.isEmpty
+                    ? 'Create departments from Departments screen first'
+                    : null,
+              ),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
@@ -861,9 +966,11 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
       'phone': _phoneController.text.trim().isEmpty
           ? null
           : _phoneController.text.trim(),
-      'departmentId': _departmentController.text.trim().isEmpty
+      'departmentId': (_selectedDepartment ?? _departmentController.text)
+              .trim()
+              .isEmpty
           ? null
-          : _departmentController.text.trim(),
+          : (_selectedDepartment ?? _departmentController.text).trim(),
       'role': _selectedRole.toLowerCase(),
     });
 
@@ -943,5 +1050,15 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
         backgroundColor: AppTheme.warningColor,
       ),
     );
+  }
+
+  List<String> _departmentOptions() {
+    final options = {...widget.departments};
+    final current = _selectedDepartment?.trim();
+    if (current != null && current.isNotEmpty && current != '-') {
+      options.add(current);
+    }
+    final sorted = options.toList()..sort();
+    return sorted;
   }
 }

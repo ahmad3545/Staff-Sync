@@ -945,6 +945,18 @@ class _PayrollScreenState extends State<PayrollScreen> {
                 );
 
                 if (response.statusCode == 200) {
+                  setState(() {
+                    _baseSalary = baseSalary;
+                    final userIndex = _users.indexWhere(
+                      (user) => user['id']?.toString() == targetUserId,
+                    );
+                    if (userIndex != -1) {
+                      _users[userIndex] = {
+                        ..._users[userIndex],
+                        'baseSalary': baseSalary,
+                      };
+                    }
+                  });
                   await _loadPayrollSettings(targetUserId);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(

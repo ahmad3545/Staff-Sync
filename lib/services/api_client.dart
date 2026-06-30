@@ -194,6 +194,8 @@ class ApiClient {
         return _broadcast(body);
       case '/api/departments':
         return _add('departments', body);
+      case '/api/departments/head':
+        return _assignDepartmentHead(body);
       case '/api/reports/generate':
         return _add('reports', {...body, 'status': 'generated'});
       case '/api/geofence':
@@ -205,15 +207,11 @@ class ApiClient {
       case '/api/payroll/calculate':
         return _calculatePayroll(body);
       case '/api/admin/payroll-settings':
-        await _db
-            .collection('settings')
-            .doc('payroll')
-            .set(_clean(body), SetOptions(merge: true));
-        return {'updated': true};
+        return _savePayrollSettings(body);
       case '/api/shifts':
         return _add('shifts', body);
       case '/api/shifts/assign':
-        return _add('shiftAssignments', body);
+        return _assignShift(body);
       default:
         throw UnsupportedError('Unsupported Firebase POST: $path');
     }
@@ -308,6 +306,41 @@ class ApiClient {
     return {'id': doc.id};
   }
 
+  Future<Map<String, dynamic>> _assignShift(Map<String, dynamic> body) async {
+    final shiftId = body['shiftId']?.toString();
+    if (shiftId == null || shiftId.isEmpty) {
+      throw ArgumentError('shiftId required');
+    }
+    final userIds = (body['userIds'] as List<dynamic>? ?? [])
+        .map((value) => value.toString())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    await _db.collection('shifts').doc(shiftId).set({
+      'assignedUserIds': userIds,
+      'updatedAtUtc': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    return {'updated': true};
+  }
+
+  Future<Map<String, dynamic>> _assignDepartmentHead(
+    Map<String, dynamic> body,
+  ) async {
+    final departmentId = body['departmentId']?.toString();
+    final headUserId = body['headUserId']?.toString();
+    if (departmentId == null || departmentId.isEmpty) {
+      throw ArgumentError('departmentId required');
+    }
+    if (headUserId == null || headUserId.isEmpty) {
+      throw ArgumentError('headUserId required');
+    }
+    await _db.collection('departments').doc(departmentId).set({
+      'headUserId': headUserId,
+      'headName': body['headName']?.toString(),
+      'updatedAtUtc': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    return {'updated': true};
+  }
+
   Future<Map<String, dynamic>> _createStaffProfile(
     Map<String, dynamic> body,
   ) async {
@@ -380,6 +413,25 @@ class ApiClient {
     };
     final doc = await _db.collection('payroll').add(data);
     return {'id': doc.id, 'netSalary': net};
+  }
+
+  Future<Map<String, dynamic>> _savePayrollSettings(
+    Map<String, dynamic> body,
+  ) async {
+    final userId = body['userId']?.toString();
+    if (userId == null || userId.isEmpty) {
+      throw ArgumentError('userId required');
+    }
+    final baseSalary = _toDouble(body['baseSalary']);
+    final overtimeRate = body.containsKey('overtimeRate')
+        ? _toDouble(body['overtimeRate'])
+        : null;
+    await _db.collection('users').doc(userId).set({
+      'baseSalary': baseSalary,
+      if (overtimeRate != null) 'overtimeRate': overtimeRate,
+      'updatedAtUtc': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    return {'updated': true, 'userId': userId, 'baseSalary': baseSalary};
   }
 
   Future<Map<String, dynamic>> _absenteePredictions() async {

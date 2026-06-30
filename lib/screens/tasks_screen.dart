@@ -235,13 +235,15 @@ class _TasksScreenState extends State<TasksScreen> {
     );
   }
 
-  void _markTaskAsComplete(
-    BuildContext context,
+  Future<void> _markTaskAsComplete(
+    BuildContext sheetContext,
     String taskId,
     String notes,
   ) async {
-    // Show a loading indicator and pop the bottom sheet
-    Navigator.pop(context);
+    Navigator.pop(sheetContext);
+    if (!mounted) {
+      return;
+    }
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Submitting task...')));
@@ -249,12 +251,28 @@ class _TasksScreenState extends State<TasksScreen> {
     try {
       await FirebaseFirestore.instance.collection('tasks').doc(taskId).update({
         'status': 'completed',
-        'completionNotes': notes,
+        'completionNotes': notes.trim(),
         'completedAtUtc': FieldValue.serverTimestamp(),
+        'updatedAtUtc': FieldValue.serverTimestamp(),
       });
 
-      // Refresh the tasks list
-      _loadTasks();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        final index = _tasks.indexWhere((task) => task['id'] == taskId);
+        if (index != -1) {
+          _tasks[index] = {
+            ..._tasks[index],
+            'status': 'completed',
+          };
+        }
+      });
+
+      await _loadTasks();
+      if (!mounted) {
+        return;
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -264,9 +282,12 @@ class _TasksScreenState extends State<TasksScreen> {
       );
     } catch (e) {
       debugPrint('Error marking task as complete: $e');
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to update task. Please try again.'),
+        SnackBar(
+          content: Text('Failed to update task: $e'),
           backgroundColor: AppTheme.errorColor,
         ),
       );
